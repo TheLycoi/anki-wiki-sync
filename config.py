@@ -28,6 +28,8 @@ from aqt import mw
 CONFIG_KEY_OBSIDIAN_PATH = "obsidianSyncPath"
 CONFIG_KEY_EXCLUDED_DECKS = "excludedDecks"
 CONFIG_KEY_FILENAME_SUFFIX = "filenameSuffix"
+CONFIG_KEY_INCLUDE_DECKS = "includeDecks"
+CONFIG_KEY_WIKI_SCHEMA = "wikiSchemaOutput"
 
 # --- root-level keys for profile isolation ---
 _ROOT_PROFILES = "profiles"
@@ -85,7 +87,8 @@ def _write_raw(config: dict):
 
 # ═══════════════════ Profile resolution ═══════════════════
 
-ALL_KEYS = {CONFIG_KEY_OBSIDIAN_PATH, CONFIG_KEY_EXCLUDED_DECKS, CONFIG_KEY_FILENAME_SUFFIX}
+ALL_KEYS = {CONFIG_KEY_OBSIDIAN_PATH, CONFIG_KEY_EXCLUDED_DECKS, CONFIG_KEY_FILENAME_SUFFIX,
+            CONFIG_KEY_INCLUDE_DECKS, CONFIG_KEY_WIKI_SCHEMA}
 
 
 def _current_profile() -> str:
@@ -162,6 +165,19 @@ def get_obsidian_path() -> Optional[str]:
 def set_obsidian_path(path: str):
     if not path or not os.path.isdir(path):
         return
+    # Containment guard: never sync into a vault root. The mirror must live in
+    # a quarantined subfolder (e.g. <vault>/anki) so the sync's differential
+    # deletes can only ever touch its own tree.
+    from .wiki_schema import is_vault_root
+    if is_vault_root(path):
+        from aqt.utils import showWarning
+        showWarning(
+            "The selected folder is an Obsidian vault root.\n\n"
+            "Pick (or create) a dedicated subfolder such as 'anki' inside the "
+            "vault instead — the sync deletes files it no longer recognizes, "
+            "so it must own its target folder exclusively."
+        )
+        return
     cfg = _profile_config()
     cfg[CONFIG_KEY_OBSIDIAN_PATH] = path
     _write_profile(cfg)
@@ -174,6 +190,32 @@ def get_excluded_decks() -> List[str]:
 def set_excluded_decks(decks: List[str]):
     cfg = _profile_config()
     cfg[CONFIG_KEY_EXCLUDED_DECKS] = decks
+    _write_profile(cfg)
+
+
+def get_include_decks() -> Optional[List[str]]:
+    """Deck allowlist. None = not configured (legacy exclude-list behavior);
+    a list (even empty) = only listed decks sync. Empty list syncs nothing —
+    the safe default for a fresh install of this fork."""
+    return _read_profile_field(CONFIG_KEY_INCLUDE_DECKS)
+
+
+def set_include_decks(decks: Optional[List[str]]):
+    cfg = _profile_config()
+    if decks is None:
+        cfg.pop(CONFIG_KEY_INCLUDE_DECKS, None)
+    else:
+        cfg[CONFIG_KEY_INCLUDE_DECKS] = decks
+    _write_profile(cfg)
+
+
+def get_wiki_schema_enabled() -> bool:
+    return bool(_read_profile_field(CONFIG_KEY_WIKI_SCHEMA, True))
+
+
+def set_wiki_schema_enabled(value: bool):
+    cfg = _profile_config()
+    cfg[CONFIG_KEY_WIKI_SCHEMA] = bool(value)
     _write_profile(cfg)
 
 

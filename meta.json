@@ -1,1 +1,22 @@
-{"name": "Obsidian Sync (Differential) by M Saajeel \u2b50", "version": "0.1.0", "description": "Differentially syncs Anki decks and cards to a specified Obsidian vault folder, creating Markdown files and MOCs.", "author": "Mohd Sajeel Memon", "support_url": "", "homepage_url": "", "package": "anki_obsidian_sync", "anki_version_minimum": "2.1.49", "disabled": false, "mod": 0, "conflicts": [], "max_point_version": 0, "min_point_version": 0, "branch_index": 0, "update_enabled": true, "hint": "", "mark_color": "#000000"}
+{
+  "name": "Anki Wiki Sync (Anki to Obsidian wiki)",
+  "version": "0.3.0",
+  "description": "Syncs Anki decks into an Obsidian vault as a compact, queryable wiki: one page per deck, every card a linkable block.",
+  "author": "Conrad Kelonu (evolved from Obsidian Sync by Mohd Sajeel Memon)",
+  "support_url": "",
+  "homepage_url": "https://github.com/TheLycoi/anki-wiki-sync",
+  "package": "anki_wiki_sync",
+  "anki_version_minimum": "2.1.49",
+  "disabled": false,
+  "mod": 0,
+  "conflicts": [
+    "anki_obsidian_sync",
+    "loopback_return_sync"
+  ],
+  "max_point_version": 0,
+  "min_point_version": 0,
+  "branch_index": 0,
+  "update_enabled": false,
+  "hint": "",
+  "mark_color": "#000000"
+}

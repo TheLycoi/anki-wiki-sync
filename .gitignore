@@ -50,3 +50,6 @@ Desktop.ini
 # ── Anki addon specific ──
 *.ankiaddon
 
+
+# Local add-on configuration (per machine, contains vault paths)
+config.json

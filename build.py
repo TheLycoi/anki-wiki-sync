@@ -22,10 +22,13 @@ INCLUDE = {
     "config.py",
     "config_ui.py",
     "config.json",
+    "config.example.json",
     "diff_calculator.py",
     "executor.py",
     "html_converter.py",
     "state_builder.py",
+    "wiki_schema.py",
+    "wiki_format.py",
     "meta.json",
     "LICENSE",
 }
@@ -128,7 +131,8 @@ def publish(publish_dir: str):
 # ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     version = load_version()
-    default_output = os.path.join(ROOT, "dist", f"anki_obsidian_sync-{version}.ankiaddon")
+    package = load_package_name()
+    default_output = os.path.join(ROOT, "dist", f"{package}-{version}.ankiaddon")
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(

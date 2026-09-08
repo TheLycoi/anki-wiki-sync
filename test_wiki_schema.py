@@ -1,0 +1,200 @@
+# -*- coding: utf-8 -*-
+
+"""Standalone tests for wiki_schema.py (no Anki required).
+
+Run: python3 test_wiki_schema.py
+"""
+
+import importlib.util
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+_spec = importlib.util.spec_from_file_location(
+    "wiki_schema", os.path.join(os.path.dirname(__file__), "wiki_schema.py"))
+ws = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ws)
+
+
+class TestSlugify(unittest.TestCase):
+    def test_basic(self):
+        self.assertEqual(ws.slugify("How to Write Good Prompts"), "how-to-write-good-prompts")
+
+    def test_punctuation_and_unicode(self):
+        self.assertEqual(ws.slugify("Woźniak's 20 rules!"), "wozniak-s-20-rules")
+
+    def test_empty(self):
+        self.assertEqual(ws.slugify(""), "")
+        self.assertEqual(ws.slugify("???"), "")
+
+
+class TestVaultRoot(unittest.TestCase):
+    def test_find_and_guard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp) / "vault"
+            (vault / ".obsidian").mkdir(parents=True)
+            anki_dir = vault / "anki"
+            anki_dir.mkdir()
+            self.assertEqual(ws.find_vault_root(anki_dir), vault.resolve())
+            self.assertTrue(ws.is_vault_root(str(vault)))
+            self.assertFalse(ws.is_vault_root(str(anki_dir)))
+
+    def test_no_vault(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(ws.find_vault_root(Path(tmp)))
+
+
+class TestWikiLinkResolver(unittest.TestCase):
+    def _make_vault(self, tmp):
+        vault = Path(tmp) / "vault"
+        (vault / ".obsidian").mkdir(parents=True)
+        for rel in ("wiki/concepts", "wiki/entities", "wiki/sources"):
+            (vault / rel).mkdir(parents=True)
+        (vault / "wiki/concepts/spaced-repetition.md").write_text("x")
+        (vault / "wiki/entities/andy-matuschak.md").write_text("x")
+        (vault / "wiki/sources/how-to-write-good-prompts_a3709a.md").write_text("x")
+        return vault
+
+    def test_resolves_exact_and_hash_suffixed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = ws.WikiLinkResolver(self._make_vault(tmp))
+            self.assertEqual(r.resolve_slug("spaced-repetition"), "wiki/concepts/spaced-repetition")
+            # Compiled source pages resolve with or without the hash suffix
+            self.assertEqual(r.resolve_slug("how-to-write-good-prompts"),
+                             "wiki/sources/how-to-write-good-prompts_a3709a")
+            self.assertEqual(r.resolve_slug("how-to-write-good-prompts_a3709a"),
+                             "wiki/sources/how-to-write-good-prompts_a3709a")
+
+    def test_source_namespace_prefers_sources_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = self._make_vault(tmp)
+            # Same slug exists as both a concept and a compiled source page
+            (vault / "wiki/concepts/how-to-write-good-prompts.md").write_text("x")
+            r = ws.WikiLinkResolver(vault)
+            self.assertEqual(r.resolve_slug("how-to-write-good-prompts", namespace="source"),
+                             "wiki/sources/how-to-write-good-prompts_a3709a")
+            self.assertEqual(r.resolve_slug("how-to-write-good-prompts", namespace="wiki"),
+                             "wiki/concepts/how-to-write-good-prompts")
+
+    def test_links_for_tags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = ws.WikiLinkResolver(self._make_vault(tmp))
+            links = r.links_for_tags([
+                "wiki::spaced-repetition",
+                "wiki::andy-matuschak",
+                "source::how-to-write-good-prompts",
+                "wiki::spaced-repetition",   # duplicate → dropped
+                "wiki::no-such-page",        # unresolvable → dropped
+                "marked",                    # non-loopback tag → ignored
+            ])
+            self.assertEqual(links, [
+                "[[wiki/concepts/spaced-repetition]]",
+                "[[wiki/entities/andy-matuschak]]",
+                "[[wiki/sources/how-to-write-good-prompts_a3709a]]",
+            ])
+
+    def test_no_vault_root_resolves_nothing(self):
+        r = ws.WikiLinkResolver(None)
+        self.assertEqual(r.links_for_tags(["wiki::spaced-repetition"]), [])
+
+
+class TestFrontmatterAndFooter(unittest.TestCase):
+    def test_frontmatter_wraps_and_preserves_sync_keys(self):
+        base = {"anki_note_id": 42, "anki_note_mod": 100, "content_hash": "abc"}
+        fm = ws.build_card_frontmatter(base, "WikiTest/Sub", ["[[wiki/concepts/x]]"], "2026-09-07")
+        self.assertEqual(fm["type"], "anki-card")
+        self.assertEqual(fm["schema_version"], ws.WIKI_SCHEMA_VERSION)
+        self.assertEqual(fm["deck"], "WikiTest::Sub")
+        self.assertEqual(fm["anki_note_id"], 42)
+        self.assertEqual(fm["content_hash"], "abc")
+
+    def test_footer(self):
+        self.assertEqual(ws.build_wiki_footer([]), "")
+        footer = ws.build_wiki_footer(["[[wiki/concepts/x]]"])
+        self.assertIn("## Wiki", footer)
+        self.assertIn("- [[wiki/concepts/x]]", footer)
+
+
+class TestTopicNoteIndex(unittest.TestCase):
+    def _make_vault(self, tmp):
+        vault = Path(tmp) / "vault"
+        (vault / ".obsidian").mkdir(parents=True)
+        (vault / "classes/PHED163").mkdir(parents=True)
+        (vault / "classes/Psychopathology").mkdir(parents=True)
+        (vault / "classes/PHED163/Stages of Change.md").write_text(
+            "---\nclass: PHED163\n---\n\nbody\n")
+        (vault / "classes/Psychopathology/X.md").write_text(
+            "---\nclass: PSYC\n---\n\nbody\n")
+        return vault
+
+    def test_matches_deck_segment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            idx = ws.TopicNoteIndex(self._make_vault(tmp))
+            self.assertEqual(idx.topics_for_deck("PHED163::Module 3"),
+                             ["[[classes/PHED163/Stages of Change]]"])
+            self.assertEqual(idx.topics_for_deck("PSYC::Unit 1"),
+                             ["[[classes/Psychopathology/X]]"])
+            self.assertEqual(idx.topics_for_deck("Nothing::Here"), [])
+
+    def test_matching_is_case_insensitive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            idx = ws.TopicNoteIndex(self._make_vault(tmp))
+            self.assertEqual(idx.topics_for_deck("phed163::module 3"),
+                             ["[[classes/PHED163/Stages of Change]]"])
+            self.assertEqual(idx.topics_for_deck("PhEd163"),
+                             ["[[classes/PHED163/Stages of Change]]"])
+
+    def test_exclude_rel_skips_sync_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = self._make_vault(tmp)
+            (vault / "anki").mkdir()
+            # A synced deck page must never be offered back as a topic.
+            (vault / "anki/phed163-module-3.md").write_text(
+                "---\nclass: PHED163\n---\n")
+            idx = ws.TopicNoteIndex(vault, exclude_rel=["anki"])
+            self.assertEqual(idx.topics_for_deck("PHED163::Module 3"),
+                             ["[[classes/PHED163/Stages of Change]]"])
+
+    def test_skips_dot_folders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = self._make_vault(tmp)
+            (vault / ".trash").mkdir()
+            (vault / ".trash/old.md").write_text("---\nclass: PHED163\n---\n")
+            idx = ws.TopicNoteIndex(vault)
+            self.assertEqual(idx.topics_for_deck("PHED163"),
+                             ["[[classes/PHED163/Stages of Change]]"])
+
+    def test_ignores_files_without_frontmatter_or_class(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = self._make_vault(tmp)
+            (vault / "plain.md").write_text("no frontmatter, just text\n")
+            (vault / "other.md").write_text("---\ntitle: X\n---\n")
+            idx = ws.TopicNoteIndex(vault)
+            self.assertEqual(idx.topics_for_deck("PHED163"),
+                             ["[[classes/PHED163/Stages of Change]]"])
+            self.assertEqual(idx.topics_for_deck("X"), [])
+
+    def test_unreadable_file_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = self._make_vault(tmp)
+            bad = vault / "bad.md"
+            bad.write_bytes(b"---\nclass: \xff\xfe PHED163\n---\n")
+            # Must not raise; the good note still resolves.
+            idx = ws.TopicNoteIndex(vault)
+            self.assertIn("[[classes/PHED163/Stages of Change]]",
+                          idx.topics_for_deck("PHED163"))
+
+    def test_no_vault_root(self):
+        self.assertEqual(ws.TopicNoteIndex(None).topics_for_deck("PHED163"), [])
+
+    def test_quoted_class_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = self._make_vault(tmp)
+            (vault / "quoted.md").write_text('---\nclass: "BIOL200"\n---\n')
+            idx = ws.TopicNoteIndex(vault)
+            self.assertEqual(idx.topics_for_deck("BIOL200"), ["[[quoted]]"])
+
+
+if __name__ == "__main__":
+    unittest.main()
