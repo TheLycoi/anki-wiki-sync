@@ -13,10 +13,12 @@ This module must stay importable without Anki (no aqt/anki imports) so its
 logic can be unit-tested standalone.
 """
 
+import html
 import re
 import unicodedata
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
+from urllib.parse import parse_qs, urlsplit
 
 # Bumped whenever the frontmatter/body schema changes; mirrored notes carrying
 # an older number are rewritten on the next sync even if the card is unchanged.
@@ -26,6 +28,39 @@ WIKI_SCHEMA_VERSION = 1
 WIKI_PAGE_DIRS = ("wiki/concepts", "wiki/entities", "wiki/sources")
 
 LOOPBACK_TAG_RE = re.compile(r"^(wiki|source)::(.+)$")
+
+# Recall puts `obsidian://open?vault=…&file=<path>#^<block>` in a card's
+# extra field. Stops before quote, whitespace and the `)` of a markdown link.
+_OBSIDIAN_OPEN_RE = re.compile(r"obsidian://open\?[^\s\"'<>)\]]+")
+
+
+def parse_obsidian_source_link(fields_md):
+    # type: (Optional[Dict[str, str]]) -> Optional[Tuple[str, str]]
+    """(vault-relative note path without .md, block id without ^) from the
+    first `obsidian://open` link found in any field, or None.
+
+    Works on both the raw `href="…"` and the markdownified `[…](…)` form,
+    and on HTML-escaped `&amp;`. A `#page=N` anchor yields an empty block id.
+    """
+    for value in (fields_md or {}).values():
+        if not value:
+            continue
+        match = _OBSIDIAN_OPEN_RE.search(html.unescape(value))
+        if not match:
+            continue
+        query = parse_qs(urlsplit(match.group(0)).query)
+        target = (query.get("file") or [""])[0].strip()
+        if not target:
+            continue
+        path, _, anchor = target.partition("#")
+        path = path.strip("/")
+        if path.lower().endswith(".md"):
+            path = path[:-3]
+        if not path:
+            continue
+        block = anchor[1:] if anchor.startswith("^") else ""
+        return path, block
+    return None
 
 
 def slugify(text: str) -> str:
@@ -172,6 +207,12 @@ class TopicNoteIndex:
                 self.exclude_rel.add(cleaned)
         # lowercased class value -> sorted vault-relative paths (no .md)
         self._by_class: Dict[str, List[str]] = {}
+        # slugified filename stem -> vault-relative paths (no .md), for
+        # resolving Recall's `source::<stem-slug>` tags to the note itself
+        self._by_stem: Dict[str, List[str]] = {}
+        # vault-relative path (no .md) -> lowercased class value
+        self._class_of: Dict[str, str] = {}
+        self._notes: Set[str] = set()
         if self.vault_root is not None and self.vault_root.is_dir():
             self._scan()
 
@@ -193,13 +234,18 @@ class TopicNoteIndex:
                 continue
             if self._is_excluded(rel_path):
                 continue
+            page = rel_path[:-3] if rel_path.endswith(".md") else rel_path
+            self._notes.add(page)
+            stem = slugify(md_file.stem)
+            if stem:
+                self._by_stem.setdefault(stem, []).append(page)
             class_value = self._read_class(md_file)
             if not class_value:
                 continue
             key = class_value.strip().lower()
             if not key:
                 continue
-            page = rel_path[:-3] if rel_path.endswith(".md") else rel_path
+            self._class_of[page] = key
             self._by_class.setdefault(key, []).append(page)
 
     @staticmethod
@@ -239,3 +285,55 @@ class TopicNoteIndex:
             for page in self._by_class.get(key, ()):
                 hits.add("[[%s]]" % page)
         return sorted(hits)
+
+    def has_note(self, page):
+        # type: (str) -> bool
+        """True when *page* (vault-relative, no .md) is an indexed note."""
+        return page in self._notes
+
+    def note_for_source_tag(self, slug, deck_name=""):
+        # type: (str, str) -> Optional[str]
+        """The one vault note whose filename stem slugifies to *slug*.
+
+        Several notes can share a stem. Ties break on a `class:` matching
+        a deck segment, then on not being a wiki page; still ambiguous
+        means None rather than a guess.
+        """
+        candidates = self._by_stem.get(slugify(slug), [])
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates:
+            return None
+        segments = set(s.strip().lower() for s in (deck_name or "").split("::") if s.strip())
+        by_class = [p for p in candidates if self._class_of.get(p) in segments]
+        if len(by_class) == 1:
+            return by_class[0]
+        pool = by_class or candidates
+        non_wiki = [p for p in pool if not p.startswith("wiki/")]
+        if len(non_wiki) == 1:
+            return non_wiki[0]
+        return None
+
+
+def source_link_for_card(fields_md, tags, deck_name, topic_index):
+    # type: (Optional[Dict[str, str]], List[str], str, TopicNoteIndex) -> str
+    """Wikilink to the note (and highlight block) a card was captured from.
+
+    Prefers the exact `obsidian://` link Recall stores in the extra field,
+    then falls back to the card's `source::`/`wiki::` tag. Empty when the
+    target is not an existing vault note outside the sync folder.
+    """
+    parsed = parse_obsidian_source_link(fields_md)
+    if parsed:
+        page, block = parsed
+        if topic_index.has_note(page):
+            anchor = "#^%s" % block if block else ""
+            return "[[%s%s|%s]]" % (page, anchor, page.rsplit("/", 1)[-1])
+    for tag in tags or ():
+        m = LOOPBACK_TAG_RE.match((tag or "").strip())
+        if not m:
+            continue
+        page = topic_index.note_for_source_tag(m.group(2), deck_name)
+        if page:
+            return "[[%s|%s]]" % (page, page.rsplit("/", 1)[-1])
+    return ""

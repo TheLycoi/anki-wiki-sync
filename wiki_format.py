@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Page rendering for Anki Wiki Sync (schema_version 2).
+Page rendering for Anki Wiki Sync (schema_version 3).
 
 Pure formatting layer: turns deck and card records into the exact markdown
 text written into the vault. Imports nothing from `aqt` or `anki`, so every
@@ -33,7 +33,7 @@ try:
 except ImportError:  # standalone (tests, no package context)
     from wiki_schema import slugify
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Tags that carry sync machinery or Anki state rather than subject matter.
 # Excluded from the `tags` frontmatter list and from card grouping.
@@ -72,6 +72,8 @@ class CardRecord:
     ease: int = 0
     queue: int = 0
     mod: int = 0
+    # Ready-made `[[note#^block|Note]]` to the vault note the card came from.
+    source_link: str = ""
 
 
 @dataclass
@@ -338,8 +340,10 @@ def compute_signature(deck, topics):
     unchanged while any edit to a card's mod, lapses or ease, to the topic
     list, to the synced subdecks or to the parent changes it.
     """
+    # source_link depends on vault state, not the card, so it is hashed too.
     card_keys = sorted(
-        "%d:%d:%d:%d" % (c.nid, c.mod, c.lapses, c.ease) for c in deck.cards
+        "%d:%d:%d:%d:%s" % (c.nid, c.mod, c.lapses, c.ease, c.source_link)
+        for c in deck.cards
     )
     payload = "\n".join([
         str(SCHEMA_VERSION),
@@ -481,7 +485,8 @@ def render_deck_page(deck, slugs, topics, today, lapse_threshold=_DEF_LAPSE_THRE
     for section, rows in _group_cards(deck.cards):
         lines.append("### %s" % section)
         for text, card in rows:
-            lines.append("- %s%s" % (text, _card_link_suffix(card.nid)))
+            origin = " ← %s" % card.source_link if card.source_link else ""
+            lines.append("- %s%s%s" % (text, origin, _card_link_suffix(card.nid)))
 
     return "\n".join(lines) + "\n"
 
@@ -605,6 +610,13 @@ def render_schema_page(target_rel_folder):
         "with a leading `!`.",
         "",
         "The `↗` link on each line opens that note in Anki.",
+        "",
+        "A `← [[note#^block|Note]]` before it points at the vault note the "
+        "card was captured from, and at the exact highlight block when the "
+        "card carries one (Recall cloze cards do). Open the backlinks pane on "
+        "that note to see every card drawn from it. Never put links to this "
+        "folder inside `wiki/` pages: the LLM wiki linter treats them as dead "
+        "and replaces them with stubs.",
         "",
         "## How to query",
         "",

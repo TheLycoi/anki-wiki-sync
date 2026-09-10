@@ -90,8 +90,8 @@ sync_signature: 5f1c...
 
 ## Cards
 ### phed163
-- Precontemplation: the client has ==no intention of changing== in the foreseeable future. · Extra: Shares benefits only with permission. [↗](anki://x-callback-url/search?query=nid:1725000000001) ^n1725000000001
-- What is decisional balance? → Weighing the pros against the cons of changing. [↗](anki://x-callback-url/search?query=nid:1725000000002) ^n1725000000002
+- Precontemplation: the client has ==no intention of changing== in the foreseeable future. · Extra: Shares benefits only with permission. ← [[classes/PHED163/Stages of Change#^recall-8f2a|Stages of Change]] [↗](anki://x-callback-url/search?query=nid:1725000000001) ^n1725000000001
+- What is decisional balance? → Weighing the pros against the cons of changing. ← [[classes/PHED163/Decisional Balance|Decisional Balance]] [↗](anki://x-callback-url/search?query=nid:1725000000002) ^n1725000000002
 ### untagged
 - ...
 ```
@@ -103,6 +103,14 @@ untagged cards last. A "Weak spots" section lists the cards with the
 most lapses. The `topics` list links to vault notes about the deck's
 subject, resolved from Anki tags and from any vault note whose
 frontmatter `class:` matches the deck.
+
+Each card also carries a `← [[note#^block|Note]]` link to the vault note
+it was captured from: the exact highlight block when the card's extra
+field holds an `obsidian://open` link (Recall writes one for cloze cards),
+otherwise the note whose filename matches the card's `source::` or
+`wiki::` tag. Open the backlinks pane on a class note and every card drawn
+from it is listed. Never place links to the sync folder inside pages
+managed by an LLM wiki plugin; its linter will replace them with stubs.
 
 ## How to query it
 

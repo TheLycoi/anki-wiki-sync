@@ -1,6 +1,6 @@
 {
   "name": "Anki Wiki Sync (Anki to Obsidian wiki)",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Syncs Anki decks into an Obsidian vault as a compact, queryable wiki: one page per deck, every card a linkable block.",
   "author": "Conrad Kelonu (evolved from Obsidian Sync by Mohd Sajeel Memon)",
   "support_url": "",

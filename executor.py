@@ -25,7 +25,7 @@ from aqt import mw
 from .html_converter import convert_html_to_markdown
 from . import wiki_format
 from .wiki_format import CardRecord, DeckRecord
-from .wiki_schema import WikiLinkResolver, TopicNoteIndex, find_vault_root
+from .wiki_schema import WikiLinkResolver, TopicNoteIndex, find_vault_root, source_link_for_card
 
 ASSETS_FOLDER = "assets"
 INDEX_FILENAME = "index.md"
@@ -176,6 +176,7 @@ def build_deck_records(anki_state: Dict[str, Any], vault_root: Optional[Path],
                 ease=note_data.get("card_ease", 0),
                 queue=note_data.get("card_queue", 0),
                 mod=note_data.get("note_mod_time", 0),
+                source_link=source_link_for_card(fields_md, tags, full_name, topic_index),
             ))
 
         # Synced children, by full name: one :: segment deeper than this deck.

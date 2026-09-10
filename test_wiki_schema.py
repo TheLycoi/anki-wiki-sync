@@ -195,6 +195,101 @@ class TestTopicNoteIndex(unittest.TestCase):
             idx = ws.TopicNoteIndex(vault)
             self.assertEqual(idx.topics_for_deck("BIOL200"), ["[[quoted]]"])
 
+    def test_note_for_source_tag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = self._make_vault(tmp)
+            (vault / "wiki/concepts").mkdir(parents=True)
+            (vault / "wiki/concepts/stages-of-change.md").write_text("x")
+            (vault / "classes/Psychopathology/Stages of Change.md").write_text(
+                "---\nclass: PSYC\n---\n")
+            idx = ws.TopicNoteIndex(vault)
+            # Unique stem resolves outright.
+            self.assertEqual(idx.note_for_source_tag("x"), "classes/Psychopathology/X")
+            # Three notes share the stem: the deck's class breaks the tie.
+            self.assertEqual(idx.note_for_source_tag("stages-of-change", "PHED163::M3"),
+                             "classes/PHED163/Stages of Change")
+            self.assertEqual(idx.note_for_source_tag("Stages of Change", "PSYC"),
+                             "classes/Psychopathology/Stages of Change")
+            # No class match and two non-wiki candidates: refuse to guess.
+            self.assertIsNone(idx.note_for_source_tag("stages-of-change", "Other"))
+            self.assertIsNone(idx.note_for_source_tag("no-such-note"))
+            self.assertTrue(idx.has_note("classes/PHED163/Stages of Change"))
+            self.assertFalse(idx.has_note("classes/PHED163/Missing"))
+
+    def test_wiki_page_loses_tie_to_vault_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = self._make_vault(tmp)
+            (vault / "wiki/concepts").mkdir(parents=True)
+            (vault / "wiki/concepts/stages-of-change.md").write_text("x")
+            idx = ws.TopicNoteIndex(vault)
+            self.assertEqual(idx.note_for_source_tag("stages-of-change", "Other"),
+                             "classes/PHED163/Stages of Change")
+
+
+class TestObsidianSourceLink(unittest.TestCase):
+    RAW = ('<div class="recall-source">Source: <a href="obsidian://open?vault=academic%20wiki'
+           '&file=classes%2FPHED163%2FStages%20of%20Change%23%5Erecall-ab12">Stages</a></div>')
+    MD = "Source: [Stages](obsidian://open?vault=academic%20wiki&file=classes%2FPHED163%2FStages%20of%20Change%23%5Erecall-ab12)"
+
+    def test_raw_href(self):
+        self.assertEqual(ws.parse_obsidian_source_link({"Back Extra": self.RAW}),
+                         ("classes/PHED163/Stages of Change", "recall-ab12"))
+
+    def test_markdown_link_and_escaped_amp(self):
+        self.assertEqual(ws.parse_obsidian_source_link({"Text": "q", "Back Extra": self.MD}),
+                         ("classes/PHED163/Stages of Change", "recall-ab12"))
+        escaped = self.MD.replace("&", "&amp;")
+        self.assertEqual(ws.parse_obsidian_source_link({"Back Extra": escaped}),
+                         ("classes/PHED163/Stages of Change", "recall-ab12"))
+
+    def test_page_anchor_and_no_anchor(self):
+        pdf = "obsidian://open?vault=v&file=sources%2Fch3.pdf%23page%3D3"
+        self.assertEqual(ws.parse_obsidian_source_link({"E": pdf}), ("sources/ch3.pdf", ""))
+        plain = "obsidian://open?vault=v&file=classes%2FA.md"
+        self.assertEqual(ws.parse_obsidian_source_link({"E": plain}), ("classes/A", ""))
+
+    def test_absent(self):
+        self.assertIsNone(ws.parse_obsidian_source_link({"Front": "q", "Back": "a"}))
+        self.assertIsNone(ws.parse_obsidian_source_link({}))
+        self.assertIsNone(ws.parse_obsidian_source_link(None))
+        self.assertIsNone(ws.parse_obsidian_source_link({"E": "obsidian://open?vault=v"}))
+
+
+class TestSourceLinkForCard(unittest.TestCase):
+    def _vault(self, tmp):
+        vault = Path(tmp) / "vault"
+        (vault / ".obsidian").mkdir(parents=True)
+        (vault / "classes/PHED163").mkdir(parents=True)
+        (vault / "classes/PHED163/Stages of Change.md").write_text("---\nclass: PHED163\n---\n")
+        (vault / "anki").mkdir()
+        (vault / "anki/phed163.md").write_text("---\ntype: deck\n---\n")
+        return vault
+
+    def test_prefers_obsidian_link_with_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            idx = ws.TopicNoteIndex(self._vault(tmp), exclude_rel=["anki"])
+            fields = {"Back Extra": TestObsidianSourceLink.MD}
+            self.assertEqual(
+                ws.source_link_for_card(fields, ["recall", "source::other"], "PHED163", idx),
+                "[[classes/PHED163/Stages of Change#^recall-ab12|Stages of Change]]")
+
+    def test_falls_back_to_tag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            idx = ws.TopicNoteIndex(self._vault(tmp), exclude_rel=["anki"])
+            self.assertEqual(
+                ws.source_link_for_card({"Front": "q"}, ["recall", "source::stages-of-change"], "PHED163", idx),
+                "[[classes/PHED163/Stages of Change|Stages of Change]]")
+
+    def test_missing_or_excluded_target_gives_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            idx = ws.TopicNoteIndex(self._vault(tmp), exclude_rel=["anki"])
+            gone = {"E": "obsidian://open?vault=v&file=classes%2FGone"}
+            self.assertEqual(ws.source_link_for_card(gone, [], "PHED163", idx), "")
+            # A capture from a synced deck page must never link back into anki/.
+            deck = {"E": "obsidian://open?vault=v&file=anki%2Fphed163"}
+            self.assertEqual(ws.source_link_for_card(deck, ["source::phed163"], "PHED163", idx), "")
+            self.assertEqual(ws.source_link_for_card({}, ["marked"], "PHED163", idx), "")
+
 
 if __name__ == "__main__":
     unittest.main()

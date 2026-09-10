@@ -1,5 +1,5 @@
 ---
-status: wave 3, awaiting live sync
+status: done, published
 architect: Fable 5.1
 date: 2026-09-07
 ---
@@ -316,3 +316,6 @@ name. Never raises on an unreadable file.
   ~/dev/anki-wiki-sync. Anki must be restarted by the owner; the quit
   request from the architect was cancelled by a dialog.
 - Not committed.
+
+- 2026-09-08: live sync passed against test wiki/anki (10 cards). Published to
+  https://github.com/TheLycoi/anki-wiki-sync (private) as commit 0a04e8a on main.

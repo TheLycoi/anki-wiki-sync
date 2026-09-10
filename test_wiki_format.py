@@ -146,7 +146,7 @@ class TestDeckPage(unittest.TestCase):
         self.assertEqual(fm["notes"], 4)
         self.assertEqual(fm["lapsing"], 1)
         self.assertEqual(fm["tags"], ["phed163", "stages"])
-        self.assertEqual(fm["schema_version"], 2)
+        self.assertEqual(fm["schema_version"], 3)
         self.assertEqual(fm["updated"], TODAY)
 
     def test_parent_omitted_when_not_synced(self):
@@ -234,6 +234,25 @@ class TestDeckPage(unittest.TestCase):
                       page)
         self.assertEqual(wf.parse_frontmatter(page)["topics"], topics)
 
+    def test_source_link_suffix_keeps_block_id_last(self):
+        deck = self._deck()
+        deck.cards[1].source_link = "[[classes/PHED163/Stages of Change#^recall-ab12|Stages of Change]]"
+        page = wf.render_deck_page(deck, self._slugs(), [], TODAY)
+        line = [ln for ln in page.split("\n") if ln.endswith("^n1002")][0]
+        self.assertEqual(
+            line,
+            "- Q → A ← [[classes/PHED163/Stages of Change#^recall-ab12|Stages of Change]]"
+            " [↗](anki://x-callback-url/search?query=nid:1002) ^n1002")
+        # Cards without a source link render exactly as before.
+        self.assertIn("- S → T [↗](anki://x-callback-url/search?query=nid:1004) ^n1004", page)
+        self.assertEqual(page.count("←"), 1)
+
+    def test_source_link_changes_signature(self):
+        deck = self._deck()
+        before = wf.compute_signature(deck, [])
+        deck.cards[0].source_link = "[[classes/PHED163/Stages of Change|Stages of Change]]"
+        self.assertNotEqual(wf.compute_signature(deck, []), before)
+
 
 class TestDeterminism(unittest.TestCase):
     def _cards(self):
@@ -306,7 +325,7 @@ class TestIndex(unittest.TestCase):
         self.assertEqual(fm["decks"], 3)
         self.assertEqual(fm["cards"], 2)
         self.assertEqual(fm["lapsing"], 1)
-        self.assertEqual(fm["schema_version"], 2)
+        self.assertEqual(fm["schema_version"], 3)
 
         body = page.split("---", 2)[2]
         self.assertIn("- [[phed163|PHED163]] (0 cards)", body)
@@ -327,7 +346,7 @@ class TestStaticPages(unittest.TestCase):
         self.assertIn("path:anki", page)
         self.assertIn("decks.base", page)
         self.assertIn("^n", page)
-        self.assertIn("schema_version: 2", page)
+        self.assertIn("schema_version: 3", page)
         self.assertEqual(wf.parse_frontmatter(page)["type"], "sync-schema")
 
     def test_base(self):
